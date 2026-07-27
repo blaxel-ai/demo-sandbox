@@ -16,8 +16,8 @@
     "form-data": "^4.0.4"
   },
   "devDependencies": {
-    "@tailwindcss/postcss": "^4",
-    "tailwindcss": "^4",
+    "@tailwindcss/postcss": "^4.3.3",
+    "tailwindcss": "^4.3.3",
     "eslint": "^9",
     "eslint-config-next": "15.3.0",
     "@eslint/eslintrc": "^3",
