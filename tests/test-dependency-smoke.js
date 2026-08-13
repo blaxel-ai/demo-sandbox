@@ -84,9 +84,28 @@ try {
   // customAlphabet()/customRandom() built their id with a `while (true)`
   // loop that only stops once `id.length` reaches the requested size. For
   // size <= 0 that condition is never true, so the call hangs forever.
-  // 3.3.17 (the max first_patched version on the 3.x line, clearing every
-  // advisory on that line, not just the one this alert names) adds
-  // `if (size <= 0) return ""` before the loop.
+  //
+  // CORRECTION (2026-08-13): this repo was originally bumped to 3.3.17,
+  // read off GHSA-2v37-7h3g-55p8's own first_patched field at the time.
+  // That advisory has since been revised (updated_at 2026-08-13) and now
+  // lists first_patched 3.3.18, vulnerable_range "< 3.3.18" -- so 3.3.17
+  // does not actually close this alert; re-pinned to 3.3.18.
+  //
+  // IMPORTANT: the two assertions below do NOT discriminate 3.3.17 from
+  // 3.3.18. Diffing the two npm tarballs directly (`diff -rq`) shows only
+  // one file differs beyond README/package.json: `async/index.native.js`
+  // (the React Native async build), where `customRandom`'s size<=0 guard
+  // was added in 3.3.18. The synchronous `index.cjs` build tested here --
+  // the only one this repo's dependency graph (postcss's non-secure id
+  // generator) ever reaches -- already had the size<=0 guard in 3.3.17;
+  // verified by installing both versions fresh and calling
+  // `customAlphabet('abcdef', 0)()` / `customRandom(...)` on each: both
+  // return '' in <1ms, identically. So this test still correctly proves
+  // the real 3.3.16 -> 3.3.17 hang fix (confirmed via the revert-check
+  // below), but it cannot and does not prove 3.3.18 over 3.3.17 -- that
+  // gap is unreachable code for this repo. Closure of this alert at 3.3.18
+  // rests on matching the advisory's version floor plus the lockfile/
+  // resolved-tree proof in the report, not on this test's output.
   //
   // A hung call cannot be observed from inside this same process without
   // blocking the whole test run forever (a genuine infinite loop, not just
