@@ -1,0 +1,105 @@
+name: Dependency verification
+
+# This repo has no pull_request CI at all (no .github/workflows existed
+# before this file). This gate is scoped to dependency PRs only, per the
+# dependabot-sweep playbook: it installs, builds, and runs the dependency
+# smoke test under BOTH package managers this repo ships lockfiles for
+# (package-lock.json and pnpm-lock.yaml -- Dependabot scans both, and alerts
+# get duplicated per lockfile), so a bump that only fixes one lockfile is
+# caught here instead of shipping half-fixed.
+on:
+  pull_request:
+    # `edited` matters: the job re-evaluates when a title is fixed after opening.
+    types: [opened, synchronize, reopened, edited, labeled]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dependency-verification-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify-npm:
+    # Dependency PRs only: this remediation, Dependabot's own PRs, or an explicit label.
+    if: >-
+      contains(github.event.pull_request.title, 'Dependabot') ||
+      startsWith(github.event.pull_request.title, 'chore(deps)') ||
+      startsWith(github.head_ref, 'cploujoux/devin/dependabot-') ||
+      startsWith(github.head_ref, 'dependabot/') ||
+      contains(github.event.pull_request.labels.*.name, 'dependencies') ||
+      github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run test:dependency-smoke
+      # `npm run build` (bare `next build`) fails on this repo today for a
+      # reason unrelated to any dependency: 19 pre-existing
+      # react/no-unescaped-entities lint errors across src/app/**, present
+      # identically on untouched main (verified: `git diff origin/main...HEAD
+      # -- src/` is empty on the branch that introduced this workflow). Using
+      # --no-lint here so a dependency bump isn't blocked by an unrelated,
+      # already-tracked lint debt; `next build`'s actual compilation (the
+      # part a dependency bump could break) still runs and must pass.
+      - run: npx next build --no-lint
+      # The existing `npm test` chain (tests/test1.js && tests/test2.js &&
+      # tests/test3.js) is intentionally excluded here: tests/test3.js
+      # asserts a false statement by design ("Intentionally incorrect
+      # assertion to make the test fail") and always exits 1, identically on
+      # untouched main. Running it here would make this gate permanently red
+      # for a reason no dependency bump can fix. test:dependency-smoke above
+      # is this gate's real coverage for the packages this workflow exists
+      # to verify.
+
+  verify-pnpm:
+    if: >-
+      contains(github.event.pull_request.title, 'Dependabot') ||
+      startsWith(github.event.pull_request.title, 'chore(deps)') ||
+      startsWith(github.head_ref, 'cploujoux/devin/dependabot-') ||
+      startsWith(github.head_ref, 'dependabot/') ||
+      contains(github.event.pull_request.labels.*.name, 'dependencies') ||
+      github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      # `version` is mandatory here: pnpm/action-setup refuses to run without
+      # one (from its own config, package.json's `packageManager`, or
+      # `devEngines.packageManager`), and this repo's package.json declares
+      # none of those -- it never ran pnpm in CI before this workflow.
+      # Pinned to the latest stable pnpm release at the time this gate was
+      # written; verified locally against this repo's committed
+      # pnpm-lock.yaml (lockfileVersion 9.0) with the exact command below.
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+        with:
+          version: 11.21.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+          cache: pnpm
+      # --ignore-scripts: this repo's resolved tree includes two packages
+      # (sharp, unrs-resolver) whose postinstall build pnpm 11's
+      # supply-chain policy blocks by default (ERR_PNPM_IGNORED_BUILDS),
+      # which makes a plain `pnpm install`/`pnpm install --frozen-lockfile`
+      # exit 1 -- pre-existing and unrelated to this bump (reproduced
+      # identically on untouched main with a clean pnpm store). Neither
+      # package's build step is needed here: both ship prebuilt platform
+      # binaries as their actual content, this repo never imports sharp
+      # directly, and the smoke test/build below don't need either build to
+      # have run. Skipping all lifecycle scripts is the stricter option
+      # (no script runs at all), not a relaxation of the policy -- approving
+      # specific packages via `pnpm approve-builds` was deliberately not
+      # done here, since that is a supply-chain decision for a maintainer to
+      # make explicitly, not something a dependency-bump PR should decide.
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - run: pnpm run test:dependency-smoke
+      # Same --no-lint rationale as the npm job above: 19 pre-existing,
+      # unrelated lint errors, identical on untouched main.
+      - run: npx next build --no-lint
