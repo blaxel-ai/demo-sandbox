@@ -70,7 +70,16 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      # `version` is mandatory here: pnpm/action-setup refuses to run without
+      # one (from its own config, package.json's `packageManager`, or
+      # `devEngines.packageManager`), and this repo's package.json declares
+      # none of those -- it never ran pnpm in CI before this workflow.
+      # Pinned to the latest stable pnpm release at the time this gate was
+      # written; verified locally against this repo's committed
+      # pnpm-lock.yaml (lockfileVersion 9.0) with the exact command below.
       - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+        with:
+          version: 11.21.0
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 22
