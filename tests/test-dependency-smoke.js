@@ -14,10 +14,11 @@
 // unrelated demo bug, not touched here), and the chain is `&&`-joined, so
 // anything appended after it would never run. See the report for how this is
 // wired into CI as its own step instead.
-console.log('Running dependency smoke test (js-yaml, nanoid)...');
+console.log('Running dependency smoke test (js-yaml, nanoid, sharp)...');
 
 const assert = require('node:assert/strict');
 const { execFileSync } = require('node:child_process');
+const path = require('node:path');
 
 function fail(message) {
   console.error(`Dependency smoke test FAILED: ${message}`);
@@ -148,7 +149,70 @@ try {
   assert.equal(id.length, 6);
   console.log(`  ok - postcss's non-secure nanoid(6) entry point still produces a well-formed id ("${id}")`);
 
-  console.log('Dependency smoke test passed.');
+  // --- js-yaml: GHSA-2883-xcg3-v3hh (empty merge sources not charged) ---
+  //
+  // `maxTotalMergeKeys` (default 10000) is meant to bound the CPU spent on
+  // `<<` merge keys, but before 4.3.2 an empty mapping `{}` in a merge
+  // sequence was not counted, so `N` empty mappings merged `K` times cost
+  // O(N*K) with the counter stuck at 0. 4.3.2 charges every merged source
+  // (and hard-limits a merge sequence to 100 entries), so the document
+  // below is rejected almost immediately with a YAMLException instead of
+  // being processed in full. This is a bounded-behaviour assertion, not a
+  // timing one: 4.3.1 loads this document successfully (in seconds), 4.3.2
+  // throws. The advisory's own input shape is used, sized so a vulnerable
+  // build still finishes in seconds rather than hanging the runner.
+  const mergeCount = 5000;
+  const mergeDoc =
+    'arr: &arr [' + '{},'.repeat(mergeCount).slice(0, -1) + ']\n' +
+    'targets:\n' +
+    '  - <<: *arr\n'.repeat(mergeCount);
+  const mergeStart = process.hrtime.bigint();
+  assert.throws(
+    () => yaml.load(mergeDoc),
+    (error) => error instanceof yaml.YAMLException && /merge/i.test(error.message),
+    'js-yaml accepted a merge sequence of thousands of empty mappings; 4.3.2 rejects it (GHSA-2883-xcg3-v3hh)',
+  );
+  const mergeMs = Number(process.hrtime.bigint() - mergeStart) / 1e6;
+  assert.ok(mergeMs < 3000, `rejecting the merge document took ${mergeMs.toFixed(1)}ms; expected near-immediate`);
+  console.log(`  ok - js-yaml rejected ${mergeCount} empty merge sources in ${mergeMs.toFixed(1)}ms`);
+
+  // Legitimate merge keys must keep working after the fix.
+  const merged = yaml.load('base: &base {a: 1, b: 2}\nchild:\n  <<: *base\n  b: 3\n');
+  assert.deepEqual(merged.child, { a: 1, b: 3 });
+  console.log('  ok - js-yaml still resolves an ordinary merge key');
+
+  // --- sharp: GHSA-rgj7-g3m4-5g8c (libheif vulnerabilities, fixed in 0.35.4) ---
+  //
+  // sharp is not imported by this repo; it is Next.js's optional image
+  // optimizer, pinned through `overrides` so both lockfiles resolve the
+  // same copy. The fix is in the bundled libheif (1.23.2 ships with sharp
+  // 0.35.4), so this loads sharp exactly the way Next.js does (resolved
+  // from next's own directory, which also works under pnpm's strict layout),
+  // checks the libheif the prebuilt binary carries, and runs a real
+  // encode/decode round trip so a broken native binary fails here rather
+  // than at the first optimized image in production.
+  const nextDir = path.dirname(require.resolve('next/package.json'));
+  const sharp = require(require.resolve('sharp', { paths: [nextDir] }));
+  const heif = String(sharp.versions.heif || '');
+  const [heifMajor, heifMinor, heifPatch] = heif.split('.').map(Number);
+  assert.ok(
+    heifMajor > 1 || (heifMajor === 1 && (heifMinor > 23 || (heifMinor === 23 && heifPatch >= 2))),
+    `sharp ${sharp.versions.sharp} bundles libheif ${heif || '(unknown)'}, below the 1.23.2 that fixes GHSA-rgj7-g3m4-5g8c`,
+  );
+  sharp({ create: { width: 8, height: 6, channels: 3, background: { r: 200, g: 20, b: 20 } } })
+    .png()
+    .toBuffer()
+    .then((png) => sharp(png).resize(4, 3).png().toBuffer())
+    .then((resized) => sharp(resized).metadata())
+    .then((meta) => {
+      assert.equal(meta.width, 4);
+      assert.equal(meta.height, 3);
+      assert.equal(meta.format, 'png');
+      console.log(`  ok - sharp ${sharp.versions.sharp} (libheif ${heif}) encode/resize/decode round trip`);
+      console.log('Dependency smoke test passed.');
+    })
+    .catch((error) => fail(error && error.stack ? error.stack : String(error)));
+
 } catch (error) {
   fail(error && error.stack ? error.stack : String(error));
 }
