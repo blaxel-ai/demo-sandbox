@@ -26,6 +26,7 @@ jobs:
     if: >-
       contains(github.event.pull_request.title, 'Dependabot') ||
       startsWith(github.event.pull_request.title, 'chore(deps)') ||
+      startsWith(github.head_ref, 'cploujoux/dependabot') ||
       startsWith(github.head_ref, 'cploujoux/devin/dependabot-') ||
       startsWith(github.head_ref, 'dependabot/') ||
       contains(github.event.pull_request.labels.*.name, 'dependencies') ||
@@ -49,6 +50,9 @@ jobs:
       # already-tracked lint debt; `next build`'s actual compilation (the
       # part a dependency bump could break) still runs and must pass.
       - run: npx next build --no-lint
+      # Starts the built app once (`next start`) and fetches real routes, so the
+      # Next.js bump is exercised at runtime rather than only compiled.
+      - run: npm run test:next-runtime
       # The existing `npm test` chain (tests/test1.js && tests/test2.js &&
       # tests/test3.js) is intentionally excluded here: tests/test3.js
       # asserts a false statement by design ("Intentionally incorrect
@@ -62,6 +66,7 @@ jobs:
     if: >-
       contains(github.event.pull_request.title, 'Dependabot') ||
       startsWith(github.event.pull_request.title, 'chore(deps)') ||
+      startsWith(github.head_ref, 'cploujoux/dependabot') ||
       startsWith(github.head_ref, 'cploujoux/devin/dependabot-') ||
       startsWith(github.head_ref, 'dependabot/') ||
       contains(github.event.pull_request.labels.*.name, 'dependencies') ||
@@ -103,3 +108,4 @@ jobs:
       # Same --no-lint rationale as the npm job above: 19 pre-existing,
       # unrelated lint errors, identical on untouched main.
       - run: npx next build --no-lint
+      - run: pnpm run test:next-runtime
