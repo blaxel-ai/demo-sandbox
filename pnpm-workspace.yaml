@@ -2,4 +2,9 @@ packages:
   - "."
 overrides:
   postcss: 8.5.26
-  sharp: 0.35.4
+  sharp: 0.35.5
+  # Transitive floors pnpm does not re-resolve on its own, kept inside the
+  # consumers' declared ranges (postcss ^1.2.1, minimatch ^3 / ^10).
+  source-map-js: 1.2.2
+  brace-expansion@>=1.0.0 <1.1.21: 1.1.21
+  brace-expansion@>=5.0.0 <5.0.12: 5.0.12

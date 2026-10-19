@@ -14,7 +14,7 @@
 // unrelated demo bug, not touched here), and the chain is `&&`-joined, so
 // anything appended after it would never run. See the report for how this is
 // wired into CI as its own step instead.
-console.log('Running dependency smoke test (js-yaml, nanoid, sharp)...');
+console.log('Running dependency smoke test (js-yaml, nanoid, sharp, source-map-js)...');
 
 const assert = require('node:assert/strict');
 const { execFileSync } = require('node:child_process');
@@ -180,6 +180,17 @@ try {
   const merged = yaml.load('base: &base {a: 1, b: 2}\nchild:\n  <<: *base\n  b: 3\n');
   assert.deepEqual(merged.child, { a: 1, b: 3 });
   console.log('  ok - js-yaml still resolves an ordinary merge key');
+
+  // --- source-map-js: GHSA-68fv-2mgg-jv7q (unchecked indexed-map section offset, fixed in 1.2.2) ---
+  //
+  // Reached through next -> postcss. A huge `offset.line` used to be accepted
+  // and then blocked the event loop once the mappings were consumed; 1.2.2
+  // rejects it up front. Loaded from postcss's own directory, as Next does.
+  const postcssDir = path.dirname(require.resolve('postcss/package.json', { paths: [path.dirname(require.resolve('next/package.json'))] }));
+  const { SourceMapConsumer } = require(require.resolve('source-map-js', { paths: [postcssDir] }));
+  const emptyMap = { version: 3, sources: [], names: [], mappings: '' };
+  assert.throws(() => new SourceMapConsumer({ version: 3, sections: [{ offset: { line: 1e9, column: 0 }, map: emptyMap }] }));
+  console.log('  ok - source-map-js rejects an out-of-bounds indexed section offset');
 
   // --- sharp: GHSA-rgj7-g3m4-5g8c (libheif vulnerabilities, fixed in 0.35.4) ---
   //
